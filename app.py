@@ -2,47 +2,47 @@ from flask import Flask, render_template, request, send_file
 import pdfplumber
 import pandas as pd
 import os
-import tempfile
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB limit
 
+# Home page
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# Handle file upload and conversion
 @app.route('/convert', methods=['POST'])
 def convert():
-    if 'pdf' not in request.files:
-        return {'error': 'No file uploaded'}, 400
+    # Get the uploaded file
+    uploaded_file = request.files['file']
+    if uploaded_file.filename != '':
+        # Save the file temporarily
+        file_path = os.path.join('uploads', uploaded_file.filename)
+        uploaded_file.save(file_path)
 
-    pdf_file = request.files['pdf']
-    if not pdf_file.filename.lower().endswith('.pdf'):
-        return {'error': 'Invalid file type'}, 400
+        # Extract text from PDF
+        text = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text.append(page.extract_text())
 
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Save PDF
-            pdf_path = os.path.join(temp_dir, 'input.pdf')
-            pdf_file.save(pdf_path)
-            
-            # Extract text from PDF
-            data = []
-            with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        data.append(text.split('\n'))
-            
-            # Create Excel file
-            df = pd.DataFrame(data)
-            excel_path = os.path.join(temp_dir, 'output.xlsx')
-            df.to_excel(excel_path, index=False)
-            
-            return send_file(excel_path, as_attachment=True, download_name='converted.xlsx')
+        # Convert text to Excel
+        df = pd.DataFrame(text, columns=['Text'])
+        excel_file = 'output.xlsx'
+        df.to_excel(excel_file, index=False)
 
-    except Exception as e:
-        return {'error': str(e)}, 500
+        # Send the Excel file to the user
+        return send_file(excel_file, as_attachment=True)
+
+    return "No file uploaded!"
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Create uploads folder if it doesn't exist
+    if not os.path.exists('uploads'):
+        os.makedirs('uploads')
+
+    # Get the port from the environment variable (provided by Render)
+    port = int(os.environ.get('PORT', 5000))  # Default to 5000 for local development
+
+    # Run the app on 0.0.0.0 to make it accessible externally
+    app.run(host='0.0.0.0', port=port)
